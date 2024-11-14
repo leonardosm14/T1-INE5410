@@ -13,6 +13,8 @@
  * ocorra de forma concorrente.
  */
 
+/* linhas alteradas 74,75,96,98,99,100.107,114,159,160,313,345,363,371 */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -69,6 +71,8 @@ Robo *robos;  // Array contendo todos os robôs da simulação
 int num_robos;  // Número total de robôs
 int num_total_turnos;  // Número total de turnos da simulação
 int energia_bateria;  // Quantidade de energia fornecida por uma bateria
+//mutx mover(podem querer ir pra mesma casa)
+//mutx roubar(podem querer roubar o mesmo robo)
 
 /* Declaração das funções auxiliares */
 void le_entrada();
@@ -89,22 +93,25 @@ void destroi_robos(Robo *robos, int num_robos);
 int main()
 {
     /* Leitura da entrada e inicialização da arena e dos robôs */
+//tem como fazer a leitura e a destrição de robos em paralelo e a contagem dos turnos normal?
     le_entrada();
-
+//declara thread
+//inicia mutex mover
+//inicia mutex roubar
     /* Simulação dos turnos. O turno 0 é o estado inicial. */
     for (int turno = 0; turno < num_total_turnos; turno++)
     {
         printf("Turno %d:\n", turno);
         imprime_estado();
 //        imprime_resultados();
-
+//inicializa threads pra processar cada robo
         /* Processa cada robô */
         for (int r = 0; r < num_robos; r++)
         {
             processa_robo(&robos[r]);
         }
     }
-
+//join
     /* Imprime os resultados da simulação */
     printf("Turno %d:\n", num_total_turnos);
     imprime_estado();
@@ -149,6 +156,8 @@ void le_entrada()
     }
 
     /* Lê as posições iniciais dos robôs */
+//daria pra criar as threads aqui e botar cada uma pra preencher as informações do seu robo a partir daqui
+//precisaria gerenciar um contador global pra i
     for (int i = 0; i < R; i++)
     {
         scanf("%d %d", &robos[i].i, &robos[i].j);  // Posição inicial do robô
@@ -301,7 +310,7 @@ void realiza_movimento(Robo *robo)
     // Verifica se o robô ainda tem energia para se mover
     if (robo->energia == 0)
         return;
-
+//lock
     // Verifica se a posição para onde o robô deseja se mover é válida
     if (!eh_posicao_valida(robo->move_i, robo->move_j))
         return;
@@ -333,7 +342,7 @@ void realiza_movimento(Robo *robo)
 
         // Define o ID do robô na nova célula
         nova_cel->id = robo->id;
-
+//unlock
         // Atualiza a posição do robô na arena
         robo->i = robo->move_i;
         robo->j = robo->move_j;
@@ -351,7 +360,7 @@ void realiza_roubo_energia(Robo *robot)
         return;  // Robô não precisa roubar energia
 
     int id_roubo = robot->id_roubo_energia;
-
+//lock
     // Verifica se há um robô válido para roubar e se o alvo ainda tem energia
     if (id_roubo == -1 || robos[id_roubo].energia == 0)
         return;  // Nenhum robô disponível para roubo ou sem energia
@@ -359,7 +368,7 @@ void realiza_roubo_energia(Robo *robot)
     // Rouba uma unidade de energia do robô alvo
     robos[id_roubo].energia--;
     robot->energia++;
-
+//unlock
     // Reseta a intenção de roubo após o sucesso
     robot->id_roubo_energia = -1;
 }
