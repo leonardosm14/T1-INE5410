@@ -36,6 +36,7 @@ typedef struct
 {
     char obj;  // Objeto presente na célula (VAZIO, PILAR, BATERIA, FIGURA)
     int id;    // ID do robô presente na célula ou -1 se estiver vazia
+    pthread_mutex_t arena_mutex;  // Mutex para controlar o acesso à célula -- Leonardo
 } CelulaArena;
 
 /* Estrutura para representar a arena */
@@ -73,8 +74,9 @@ int num_robos;  // Número total de robôs
 int num_total_turnos;  // Número total de turnos da simulação
 int energia_bateria;  // Quantidade de energia fornecida por uma bateria
 
-/* MUTEXES -- Leonardo */ 
+/* Mutex e Semáforo -- Leonardo */ 
 pthread_mutex_t arena_mutex;
+sem_t *semaforos; 
 
 
 /* Declaração das funções auxiliares */
@@ -103,6 +105,12 @@ int main()
 
     // Inicializa os mutexes e semáforos -- Leonardo
     pthread_mutex_init(&arena_mutex, NULL);
+    
+    semaforos = malloc(num_robos * sizeof(sem_t));
+    sem_init(&semaforos[0], 0, 1); // só o primeiro robo é liberado
+    for (int i = 1; i < num_robos; i++) {
+        sem_init(&semaforos[i], 0, 0); // demais robôs começam bloqueados
+    }
 
     /* Simulação dos turnos. O turno 0 é o estado inicial. */
     for (int turno = 0; turno < num_total_turnos; turno++)
@@ -125,6 +133,8 @@ int main()
             pthread_join(threads[r], NULL);
         }
 
+        sem_post(&semaforos[0]);
+
     }
     
 
@@ -139,6 +149,12 @@ int main()
 
     // Destrói os mutexes e semáforos -- Leonardo
     pthread_mutex_destroy(&arena_mutex);
+
+    for (int i = 0; i < num_robos; i++) {
+    sem_destroy(&semaforos[i]);
+    }
+
+    free(semaforos);
 
     return 0;
 }
@@ -232,6 +248,9 @@ void *processa_robo(void *robot)
     // Conversão necessário visto que processa_robo é passada para pthread_create -- Leonardo
     Robo *robo = (Robo *)robot;
 
+    // Aguarda o semáforo liberar o robô -- Leonardo
+    sem_wait(&semaforos[robo->id]);
+
     // Etapa de planejamento
     if (robo->energia == 0)
     {
@@ -253,6 +272,14 @@ void *processa_robo(void *robot)
         // Robô sem energia tenta roubar energia
         realiza_roubo_energia(robo);
     }
+
+    // Libera o próximo robô -- Leonardo
+    if (robo->id + 1 < num_robos) {
+        sem_post(&semaforos[robo->id + 1]);
+    } else {
+            // Se for o último robô, libera o robô inicial para o próximo turno
+            sem_post(&semaforos[0]);
+        }
 
     return NULL;
 }
@@ -448,6 +475,7 @@ void cria_arena(Arena *arena, int linhas, int colunas)
         {
             arena->cel[i][j].obj = VAZIO;  // Célula vazia
             arena->cel[i][j].id = -1;      // Sem robô inicialmente
+            pthread_mutex_init(&arena->cel[i][j].arena_mutex, NULL); // Inicializa o mutex -- Leonardo
         }
     }
 
@@ -460,7 +488,11 @@ void destroi_arena(Arena *arena)
     // Libera a memória de cada linha da matriz de células
     for (int i = 0; i < arena->n_lins; i++)
     {
+        for (int j = 0; j < arena->n_cols; j++) {
+            pthread_mutex_destroy(&arena->cel[i][j].arena_mutex);
+        }
         free(arena->cel[i]);
+        
     }
 
     // Libera a matriz de ponteiros
