@@ -36,7 +36,7 @@ typedef struct
 {
     char obj;  // Objeto presente na célula (VAZIO, PILAR, BATERIA, FIGURA)
     int id;    // ID do robô presente na célula ou -1 se estiver vazia
-    pthread_mutex_t arena_mutex;  // Mutex para controlar o acesso à célula -- Leonardo
+    pthread_mutex_t celula_mutex;  // Mutex para controlar o acesso à célula -- Leonardo
 } CelulaArena;
 
 /* Estrutura para representar a arena */
@@ -151,7 +151,7 @@ int main()
     pthread_mutex_destroy(&arena_mutex);
 
     for (int i = 0; i < num_robos; i++) {
-    sem_destroy(&semaforos[i]);
+        sem_destroy(&semaforos[i]);
     }
 
     free(semaforos);
@@ -187,6 +187,7 @@ void le_entrada()
         {
             arena.cel[i][j].obj = line[j];
             arena.cel[i][j].id = -1;  // Inicialmente, nenhuma célula contém robôs
+            pthread_mutex_init(&arena.cel[i][j].celula_mutex, NULL); // Inicializa o mutex da célula -- Thayse
         }
     }
 
@@ -302,9 +303,9 @@ void calcula_roubo_energia(Robo *robot)
         // Verifica se a posição do vizinho é válida na arena
         if (eh_posicao_valida(ni, nj))
         {
-            pthread_mutex_lock(&arena_mutex); // Bloqueia o acesso à arena -- Leonardo
+            pthread_mutex_lock(&arena.cel[ni][nj].celula_mutex); // Bloqueia o acesso à arena -- Leonardo
             int robo_vizinho = arena.cel[ni][nj].id;
-            pthread_mutex_unlock(&arena_mutex); // Libera o acesso à arena -- Leonardo
+            pthread_mutex_unlock(&arena.cel[ni][nj].celula_mutex); // Libera o acesso à arena -- Leonardo
 
             // Se houver um robô vizinho com mais de 1 unidade de energia, ele é um alvo
 
@@ -378,7 +379,7 @@ void realiza_movimento(Robo *robo)
     CelulaArena *nova_cel = &arena.cel[robo->move_i][robo->move_j];
     CelulaArena *cel = &arena.cel[robo->i][robo->j];
 
-    pthread_mutex_lock(&arena_mutex); // Bloqueia acesso à arena - Leonardo
+    pthread_mutex_lock(&cel->celula_mutex); // Bloqueia acesso à celula - Thayse
 
     // Verifica se a célula de destino está vazia e não é um obstáculo (pilar)
     if (nova_cel->obj != PILAR && nova_cel->id < 0)
@@ -414,7 +415,7 @@ void realiza_movimento(Robo *robo)
         pthread_mutex_unlock(&robo->robo_mutex);
     }
 
-    pthread_mutex_unlock(&arena_mutex);
+    pthread_mutex_unlock(&cel->celula_mutex); // Libera acesso à celula - Thayse
 }
 
 /* Função que realiza o roubo de energia de um robô vizinho */
@@ -427,15 +428,20 @@ void realiza_roubo_energia(Robo *robot)
     int id_roubo = robot->id_roubo_energia;
 
     // Verifica se há um robô válido para roubar e se o alvo ainda tem energia
+    pthread_mutex_lock(&robos[id_roubo].robo_mutex); // Bloqueia o robô alvo pra checar se continua válido -- Thayse
     if (id_roubo == -1 || robos[id_roubo].energia == 0)
         return;  // Nenhum robô disponível para roubo ou sem energia
 
     // Rouba uma unidade de energia do robô alvo
     robos[id_roubo].energia--;
+    pthread_mutex_unlock(&robos[id_roubo].robo_mutex); // Libera o robô alvo -- Thayse
+    
+    pthread_mutex_lock(&robot->robo_mutex); // Bloqueia o robô pra alterar valores -- Thayse
     robot->energia++;
 
     // Reseta a intenção de roubo após o sucesso
     robot->id_roubo_energia = -1;
+    pthread_mutex_unlock(&robot->robo_mutex); // Libera o robô -- Thayse
 }
 
 /* Função que verifica se a posição está dentro dos limites da arena */
@@ -475,7 +481,7 @@ void cria_arena(Arena *arena, int linhas, int colunas)
         {
             arena->cel[i][j].obj = VAZIO;  // Célula vazia
             arena->cel[i][j].id = -1;      // Sem robô inicialmente
-            pthread_mutex_init(&arena->cel[i][j].arena_mutex, NULL); // Inicializa o mutex -- Leonardo
+            pthread_mutex_init(&arena->cel[i][j].celula_mutex, NULL); // Inicializa o mutex -- Leonardo
         }
     }
 
@@ -489,7 +495,7 @@ void destroi_arena(Arena *arena)
     for (int i = 0; i < arena->n_lins; i++)
     {
         for (int j = 0; j < arena->n_cols; j++) {
-            pthread_mutex_destroy(&arena->cel[i][j].arena_mutex);
+            pthread_mutex_destroy(&arena->cel[i][j].celula_mutex);
         }
         free(arena->cel[i]);
         
@@ -510,4 +516,3 @@ void destroi_robos(Robo *robos, int num_robos)
     // Libera a memória do array de robôs
     free(robos);
 }
-
