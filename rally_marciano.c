@@ -262,6 +262,14 @@ void *processa_robo(void *robot)
         // Robô com energia planeja o próximo movimento
         calcula_movimento(robo);
     }
+    
+    // Libera o próximo robô -- Leonardo
+    if (robo->id + 1 < num_robos) { // Só precisa planejar com preferência -- Thayse
+        sem_post(&semaforos[robo->id + 1]);
+    } else {
+            // Se for o último robô, libera o robô inicial para o próximo turno
+            sem_post(&semaforos[0]);
+        }
 
     // Etapa de execução
     if (robo->energia > 0)
@@ -273,14 +281,6 @@ void *processa_robo(void *robot)
         // Robô sem energia tenta roubar energia
         realiza_roubo_energia(robo);
     }
-
-    // Libera o próximo robô -- Leonardo
-    if (robo->id + 1 < num_robos) {
-        sem_post(&semaforos[robo->id + 1]);
-    } else {
-            // Se for o último robô, libera o robô inicial para o próximo turno
-            sem_post(&semaforos[0]);
-        }
 
     return NULL;
 }
