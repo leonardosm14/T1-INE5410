@@ -249,7 +249,7 @@ void imprime_estado()
 /* Função que controla o processamento de cada robô */
 void *processa_robo(void *robot)
 {
-    // Conversão necessário visto que processa_robo é passada para pthread_create -- Leonardo
+    // Conversão necessária visto que processa_robo é passada para pthread_create -- Leonardo
     Robo *robo = (Robo *)robot;
 
     // Aguarda o semáforo liberar o robô -- Leonardo
@@ -306,16 +306,15 @@ void calcula_roubo_energia(Robo *robot)
         // Verifica se a posição do vizinho é válida na arena
         if (eh_posicao_valida(ni, nj))
         {
-            pthread_mutex_lock(&arena.cel[ni][nj].celula_mutex); // Bloqueia o acesso à arena -- Leonardo
+            pthread_mutex_lock(&arena.cel[ni][nj].celula_mutex); // Bloqueia o acesso à célula -- Leonardo
             int robo_vizinho = arena.cel[ni][nj].id;
-            pthread_mutex_unlock(&arena.cel[ni][nj].celula_mutex); // Libera o acesso à arena -- Leonardo
 
             // Se houver um robô vizinho com mais de 1 unidade de energia, ele é um alvo
 
             if (robo_vizinho >= 0) {
                 pthread_mutex_lock(&robos[robo_vizinho].robo_mutex); // Bloqueia o robô vizinho
                 int energia_vizinho = robos[robo_vizinho].energia;
-                pthread_mutex_unlock(&robos[robo_vizinho].robo_mutex); // Libera o robô vizinho
+                
 
                 if (energia_vizinho > 1) {
                     // Prioriza o robô de menor ID para ser roubado
@@ -323,7 +322,11 @@ void calcula_roubo_energia(Robo *robot)
                         id_robo_roubo = robo_vizinho;
                     }
                 }
+
+                pthread_mutex_unlock(&robos[robo_vizinho].robo_mutex); // Libera o robô vizinho
             }
+
+            pthread_mutex_unlock(&arena.cel[ni][nj].celula_mutex); // Libera o acesso à célula
         }
     }
 
