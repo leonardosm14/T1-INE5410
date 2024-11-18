@@ -19,6 +19,9 @@
 #include <semaphore.h>
 #include <string.h>
 
+#include <unistd.h> // PARA O SLEEP - REMOVER AO FINAL
+
+
 /* Tipos de objetos que podem estar presentes nas células da arena */
 #define VAZIO '.'     // Célula vazia
 #define PILAR 'x'     // Célula contendo um pilar (obstáculo fixo)
@@ -415,6 +418,8 @@ void realiza_movimento(Robo *robo)
         pthread_mutex_unlock(&robo->robo_mutex);
     }
 
+    sleep(5); // Pausa por 5 segundos para verificar o paralelismo -- REMOVER AO FINAL
+
     pthread_mutex_unlock(&cel->celula_mutex); // Libera acesso à celula - Thayse
 }
 
@@ -441,6 +446,9 @@ void realiza_roubo_energia(Robo *robot)
 
     // Reseta a intenção de roubo após o sucesso
     robot->id_roubo_energia = -1;
+
+    sleep(5); // Pausa por 5 segundos para verificar o paralelismo -- REMOVER AO FINAL
+
     pthread_mutex_unlock(&robot->robo_mutex); // Libera o robô -- Thayse
 }
 
