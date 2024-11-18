@@ -252,9 +252,6 @@ void *processa_robo(void *robot)
     // Conversão necessária visto que processa_robo é passada para pthread_create -- Leonardo
     Robo *robo = (Robo *)robot;
 
-    // Aguarda o semáforo liberar o robô -- Leonardo
-    sem_wait(&semaforos[robo->id]);
-
     // Etapa de planejamento
     if (robo->energia == 0)
     {
@@ -265,14 +262,9 @@ void *processa_robo(void *robot)
         // Robô com energia planeja o próximo movimento
         calcula_movimento(robo);
     }
-    
-    // Libera o próximo robô -- Leonardo
-    if (robo->id + 1 < num_robos) { // Só precisa planejar com preferência -- Thayse
-        sem_post(&semaforos[robo->id + 1]);
-    } else {
-            // Se for o último robô, libera o robô inicial para o próximo turno
-            sem_post(&semaforos[0]);
-        }
+
+    // Aguarda o semáforo liberar o robô -- Leonardo
+    sem_wait(&semaforos[robo->id]);
 
     // Etapa de execução
     if (robo->energia > 0)
@@ -284,6 +276,14 @@ void *processa_robo(void *robot)
         // Robô sem energia tenta roubar energia
         realiza_roubo_energia(robo);
     }
+
+    // Libera o próximo robô -- Leonardo
+    if (robo->id + 1 < num_robos) { // Só precisa executar com preferência -- Thayse
+        sem_post(&semaforos[robo->id + 1]);
+    } else {
+            // Se for o último robô, libera o robô inicial para o próximo turno
+            sem_post(&semaforos[0]);
+        }
 
     return NULL;
 }
@@ -385,7 +385,7 @@ void realiza_movimento(Robo *robo)
     CelulaArena *nova_cel = &arena.cel[robo->move_i][robo->move_j];
     CelulaArena *cel = &arena.cel[robo->i][robo->j];
 
-    pthread_mutex_lock(&cel->celula_mutex); // Bloqueia acesso à celula - Thayse
+    pthread_mutex_lock(&nova_cel->celula_mutex); // Bloqueia acesso à celula - Thayse
 
     // Verifica se a célula de destino está vazia e não é um obstáculo (pilar)
     if (nova_cel->obj != PILAR && nova_cel->id < 0)
@@ -423,7 +423,7 @@ void realiza_movimento(Robo *robo)
 
     sleep(5); // Pausa por 5 segundos para verificar o paralelismo -- REMOVER AO FINAL
 
-    pthread_mutex_unlock(&cel->celula_mutex); // Libera acesso à celula - Thayse
+    pthread_mutex_unlock(&nova_cel->celula_mutex); // Libera acesso à celula - Thayse
 }
 
 /* Função que realiza o roubo de energia de um robô vizinho */
