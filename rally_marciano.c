@@ -289,45 +289,51 @@ void *processa_robo(void *robot)
 }
 
 /* Função que define a intenção de roubo de energia */
-void calcula_roubo_energia(Robo *robot)
-{
+void calcula_roubo_energia(Robo *robot) {
+    
     // Arrays para representar as direções Norte, Sul, Leste e Oeste
     int di[] = {-1, 1, 0, 0}; // Movimentos verticais
     int dj[] = { 0, 0, 1,-1}; // Movimentos horizontais
 
-    int id_robo_roubo = -1;  // Inicializa a variável que armazenará o ID do robô a ser roubado
+    typedef struct {
+        int id;   // ID do robo vizinho
+        int i, j; // Coordenadas do robo vizinho
+    } RoboVizinho;
 
-    // Verifica robôs vizinhos para decidir de quem roubar energia
-    for (int i = 0; i < 4; i++)
-    {
-        int ni = robot->i + di[i];  // Calcula a nova linha do vizinho
-        int nj = robot->j + dj[i];  // Calcula a nova coluna do vizinho
+    RoboVizinho candidatos[4]; // Max de vizinhos
+    int n_candidatos = 0;      // Contador de vizinhos
+
+    // Coleta de dados protegida pelo mutex da célula (Lock 1) -- Julia
+    for (int i = 0; i < 4; i++) {
+        int ni = robot->i + di[i]; // Calcula a nova linha do vizinho
+        int nj = robot->j + dj[i]; // Calcula a nova coluna do vizinho
+
 
         // Verifica se a posição do vizinho é válida na arena
-        if (eh_posicao_valida(ni, nj))
-        {
-            pthread_mutex_lock(&arena.cel[ni][nj].celula_mutex); // Bloqueia o acesso à célula -- Leonardo
+        if (eh_posicao_valida(ni, nj)) {
+            pthread_mutex_lock(&arena.cel[ni][nj].celula_mutex); // Bloqueia acesso à célula
             int robo_vizinho = arena.cel[ni][nj].id;
-
-            // Se houver um robô vizinho com mais de 1 unidade de energia, ele é um alvo
-
-            if (robo_vizinho >= 0) {
-                pthread_mutex_lock(&robos[robo_vizinho].robo_mutex); // Bloqueia o robô vizinho
-                int energia_vizinho = robos[robo_vizinho].energia;
-                
-
-                if (energia_vizinho > 1) {
-                    // Prioriza o robô de menor ID para ser roubado
-                    if (id_robo_roubo < 0 || robo_vizinho < id_robo_roubo) {
-                        id_robo_roubo = robo_vizinho;
-                    }
-                }
-
-                pthread_mutex_unlock(&robos[robo_vizinho].robo_mutex); // Libera o robô vizinho
+            if (robo_vizinho >= 0) { // Verifica se tem robo na célula
+                candidatos[n_candidatos++] = (RoboVizinho){.id = robo_vizinho, .i = ni, .j = nj};
             }
-
-            pthread_mutex_unlock(&arena.cel[ni][nj].celula_mutex); // Libera o acesso à célula
+            pthread_mutex_unlock(&arena.cel[ni][nj].celula_mutex); // Libera acesso à célula
         }
+    }
+
+    // Escolha do robô a ser roubado protegida pelo mutex dos robôs (Lock 2) -- Julia
+    int id_robo_roubo = -1;  // Variável para guardar o ID do robo a ser roubado
+
+    for (int k = 0; k < n_candidatos; k++) {
+        RoboVizinho vizinho = candidatos[k];
+        pthread_mutex_lock(&robos[vizinho.id].robo_mutex); // Bloqueia o robô vizinho
+
+        if (robos[vizinho.id].energia > 1) { // Verifica se o robô é alvo
+            if (id_robo_roubo < 0 || vizinho.id < id_robo_roubo) {
+                id_robo_roubo = vizinho.id; // Prioriza o menor ID
+            }
+        }
+
+        pthread_mutex_unlock(&robos[vizinho.id].robo_mutex); // Libera o robô vizinho
     }
 
     // Define a intenção de roubo de energia do robô vizinho
