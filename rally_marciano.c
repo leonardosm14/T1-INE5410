@@ -78,8 +78,11 @@ int num_total_turnos;  // Número total de turnos da simulação
 int energia_bateria;  // Quantidade de energia fornecida por uma bateria
 
 /* Mutex e Semáforo -- Leonardo */ 
-pthread_mutex_t arena_mutex;
 sem_t *semaforos; 
+
+/* Novas variáveis para sincronização -- Thayse */
+pthread_barrier_t turno_barrier;  // Barreira para sincronizar os turnos
+pthread_mutex_t turno_mutex;      // Mutex para controle do turno atual
 
 
 /* Declaração das funções auxiliares */
@@ -103,31 +106,22 @@ int main()
     /* Leitura da entrada e inicialização da arena e dos robôs */
     le_entrada();
 
+    // Inicializa as estruturas de sincronização -- Thayse
+    pthread_barrier_init(&turno_barrier, NULL, num_robos);
+    pthread_mutex_init(&turno_mutex, NULL);
+
     // Cria o array com as threads -- Leonardo
     pthread_t threads[num_robos];
-
-    // Inicializa os mutexes e semáforos -- Leonardo
-    pthread_mutex_init(&arena_mutex, NULL);
-    
-    semaforos = malloc(num_robos * sizeof(sem_t));
-    sem_init(&semaforos[0], 0, 1); // só o primeiro robo é liberado
-    for (int i = 1; i < num_robos; i++) {
-        sem_init(&semaforos[i], 0, 0); // demais robôs começam bloqueados
-    }
 
     /* Simulação dos turnos. O turno 0 é o estado inicial. */
     for (int turno = 0; turno < num_total_turnos; turno++)
     {
         printf("Turno %d:\n", turno);
         imprime_estado();
-//        imprime_resultados();
 
         /* Processa cada robô */
         for (int r = 0; r < num_robos; r++)
         {
-            // processa_robo(&robos[r]);
-
-            // Cria as threads para executar a função processa_robo -- Leonardo
             pthread_create(&threads[r], NULL, processa_robo, (void *)&robos[r]);
         }
 
@@ -135,11 +129,7 @@ int main()
         for (int r = 0; r < num_robos; r++) {
             pthread_join(threads[r], NULL);
         }
-
-        sem_post(&semaforos[0]);
-
     }
-    
 
     /* Imprime os resultados da simulação */
     printf("Turno %d:\n", num_total_turnos);
@@ -147,17 +137,10 @@ int main()
     imprime_resultados();
 
     /* Liberação de memória alocada */
+    pthread_barrier_destroy(&turno_barrier);
+    pthread_mutex_destroy(&turno_mutex);
     destroi_arena(&arena);
     destroi_robos(robos, num_robos);
-
-    // Destrói os mutexes e semáforos -- Leonardo
-    pthread_mutex_destroy(&arena_mutex);
-
-    for (int i = 0; i < num_robos; i++) {
-        sem_destroy(&semaforos[i]);
-    }
-
-    free(semaforos);
 
     return 0;
 }
@@ -227,7 +210,6 @@ void le_entrada()
 /* Função para imprimir o estado atual da arena */
 void imprime_estado()
 {
-    pthread_mutex_lock(&arena_mutex); // Bloqueia o acesso à arena -- Leonardo
     for (int i = 0; i < arena.n_lins; i++)
     {
         for (int j = 0; j < arena.n_cols; j++)
@@ -242,48 +224,42 @@ void imprime_estado()
         }
         printf("\n");
     }
-    pthread_mutex_unlock(&arena_mutex); // Libera o acesso à arena -- Leonardo
     fflush(stdout);
 }
 
 /* Função que controla o processamento de cada robô */
 void *processa_robo(void *robot)
 {
-    // Conversão necessária visto que processa_robo é passada para pthread_create -- Leonardo
     Robo *robo = (Robo *)robot;
 
-    // Aguarda o semáforo liberar o robô -- Leonardo
-    sem_wait(&semaforos[robo->id]);
+    // Espera sua vez baseado no ID -- Thayse
+    for (int i = 0; i < robo->id; i++) {
+        pthread_mutex_lock(&robos[i].robo_mutex);
+        pthread_mutex_unlock(&robos[i].robo_mutex);
+    }
+
+    pthread_mutex_lock(&robo->robo_mutex);
 
     // Etapa de planejamento
     if (robo->energia == 0)
     {
-        // Robô sem energia tenta roubar energia de um vizinho
         calcula_roubo_energia(robo);
-    } else
-    {
-        // Robô com energia planeja o próximo movimento
-        calcula_movimento(robo);
-    }
-    
-    // Libera o próximo robô -- Leonardo
-    if (robo->id + 1 < num_robos) { // Só precisa planejar com preferência -- Thayse
-        sem_post(&semaforos[robo->id + 1]);
-    } else {
-            // Se for o último robô, libera o robô inicial para o próximo turno
-            sem_post(&semaforos[0]);
+        // Se encontrou alguém para roubar, realiza o roubo imediatamente
+        if (robo->id_roubo_energia != -1) {
+            realiza_roubo_energia(robo);
         }
+    }
 
-    // Etapa de execução
+    // Só calcula movimento se tiver energia após possível roubo
     if (robo->energia > 0)
     {
-        // Robô com energia realiza o movimento planejado
+        calcula_movimento(robo);
         realiza_movimento(robo);
-    } else
-    {
-        // Robô sem energia tenta roubar energia
-        realiza_roubo_energia(robo);
     }
+    pthread_mutex_unlock(&robo->robo_mutex);
+
+    // Espera todos os robôs terminarem antes de prosseguir para o próximo turno
+    pthread_barrier_wait(&turno_barrier);
 
     return NULL;
 }
@@ -291,48 +267,34 @@ void *processa_robo(void *robot)
 /* Função que define a intenção de roubo de energia */
 void calcula_roubo_energia(Robo *robot)
 {
-    // Arrays para representar as direções Norte, Sul, Leste e Oeste
     int di[] = {-1, 1, 0, 0}; // Movimentos verticais
-    int dj[] = { 0, 0, 1,-1}; // Movimentos horizontais
-
-    int id_robo_roubo = -1;  // Inicializa a variável que armazenará o ID do robô a ser roubado
-
-    // Verifica robôs vizinhos para decidir de quem roubar energia
+    int dj[] = {0, 0, 1, -1}; // Movimentos horizontais
+    int menor_id = num_robos;
+    int id_robo_roubo = -1;
+    
     for (int i = 0; i < 4; i++)
     {
-        int ni = robot->i + di[i];  // Calcula a nova linha do vizinho
-        int nj = robot->j + dj[i];  // Calcula a nova coluna do vizinho
+        int ni = robot->i + di[i];
+        int nj = robot->j + dj[i];
 
-        // Verifica se a posição do vizinho é válida na arena
         if (eh_posicao_valida(ni, nj))
         {
-            pthread_mutex_lock(&arena.cel[ni][nj].celula_mutex); // Bloqueia o acesso à célula -- Leonardo
-            int robo_vizinho = arena.cel[ni][nj].id;
-
-            // Se houver um robô vizinho com mais de 1 unidade de energia, ele é um alvo
-
-            if (robo_vizinho >= 0) {
-                pthread_mutex_lock(&robos[robo_vizinho].robo_mutex); // Bloqueia o robô vizinho
-                int energia_vizinho = robos[robo_vizinho].energia;
-                
-
-                if (energia_vizinho > 1) {
-                    // Prioriza o robô de menor ID para ser roubado
-                    if (id_robo_roubo < 0 || robo_vizinho < id_robo_roubo) {
-                        id_robo_roubo = robo_vizinho;
-                    }
+            pthread_mutex_lock(&arena.cel[ni][nj].celula_mutex);
+            int id_vizinho = arena.cel[ni][nj].id;
+            
+            if (id_vizinho >= 0 && id_vizinho != robot->id)
+            {
+                if (id_vizinho < menor_id)
+                {
+                    menor_id = id_vizinho;
+                    id_robo_roubo = id_vizinho;
                 }
-
-                pthread_mutex_unlock(&robos[robo_vizinho].robo_mutex); // Libera o robô vizinho
             }
-
-            pthread_mutex_unlock(&arena.cel[ni][nj].celula_mutex); // Libera o acesso à célula
+            pthread_mutex_unlock(&arena.cel[ni][nj].celula_mutex);
         }
     }
 
-    // Define a intenção de roubo de energia do robô vizinho
     robot->id_roubo_energia = id_robo_roubo;
-    return;
 }
 
 /* Função para planejar o próximo movimento do robô */
@@ -385,12 +347,11 @@ void realiza_movimento(Robo *robo)
     CelulaArena *nova_cel = &arena.cel[robo->move_i][robo->move_j];
     CelulaArena *cel = &arena.cel[robo->i][robo->j];
 
-    pthread_mutex_lock(&cel->celula_mutex); // Bloqueia acesso à celula - Thayse
+    pthread_mutex_lock(&nova_cel->celula_mutex);
 
     // Verifica se a célula de destino está vazia e não é um obstáculo (pilar)
     if (nova_cel->obj != PILAR && nova_cel->id < 0)
     {
-        pthread_mutex_lock(&robo->robo_mutex);
         // Coleta o objeto presente na célula de destino (se houver)
         switch (nova_cel->obj)
         {
@@ -405,9 +366,11 @@ void realiza_movimento(Robo *robo)
         // Limpa o objeto da célula de destino após coleta
         nova_cel->obj = VAZIO;
 
+        pthread_mutex_lock(&arena.cel[robo->i][robo->j].celula_mutex);
         // Atualiza as células da arena com a nova posição do robô
         if (cel->id == robo->id)
             cel->id = -1;  // Remove o robô da célula atual
+        pthread_mutex_unlock(&arena.cel[robo->i][robo->j].celula_mutex);
 
         // Define o ID do robô na nova célula
         nova_cel->id = robo->id;
@@ -418,41 +381,27 @@ void realiza_movimento(Robo *robo)
 
         // Reduz a energia do robô após o movimento
         robo->energia--;
-        pthread_mutex_unlock(&robo->robo_mutex);
     }
 
-    sleep(5); // Pausa por 5 segundos para verificar o paralelismo -- REMOVER AO FINAL
-
-    pthread_mutex_unlock(&cel->celula_mutex); // Libera acesso à celula - Thayse
+    pthread_mutex_unlock(&nova_cel->celula_mutex);
 }
 
 /* Função que realiza o roubo de energia de um robô vizinho */
 void realiza_roubo_energia(Robo *robot)
 {
-    // Verifica se o robô já possui energia suficiente
-    if (robot->energia > 0)
-        return;  // Robô não precisa roubar energia
-
-    int id_roubo = robot->id_roubo_energia;
-
-    // Verifica se há um robô válido para roubar e se o alvo ainda tem energia
-    pthread_mutex_lock(&robos[id_roubo].robo_mutex); // Bloqueia o robô alvo pra checar se continua válido -- Thayse
-    if (id_roubo == -1 || robos[id_roubo].energia == 0)
-        return;  // Nenhum robô disponível para roubo ou sem energia
-
-    // Rouba uma unidade de energia do robô alvo
-    robos[id_roubo].energia--;
-    pthread_mutex_unlock(&robos[id_roubo].robo_mutex); // Libera o robô alvo -- Thayse
+    int id_alvo = robot->id_roubo_energia;
     
-    pthread_mutex_lock(&robot->robo_mutex); // Bloqueia o robô pra alterar valores -- Thayse
-    robot->energia++;
-
-    // Reseta a intenção de roubo após o sucesso
-    robot->id_roubo_energia = -1;
-
-    sleep(5); // Pausa por 5 segundos para verificar o paralelismo -- REMOVER AO FINAL
-
-    pthread_mutex_unlock(&robot->robo_mutex); // Libera o robô -- Thayse
+    if (id_alvo >= 0 && id_alvo < num_robos)
+    {
+        pthread_mutex_lock(&robos[id_alvo].robo_mutex);
+        if (robos[id_alvo].energia > 1)
+        {
+            robos[id_alvo].energia--;
+            robot->energia++;
+            robot->id_roubo_energia = -1;
+        }
+        pthread_mutex_unlock(&robos[id_alvo].robo_mutex);
+    }
 }
 
 /* Função que verifica se a posição está dentro dos limites da arena */
