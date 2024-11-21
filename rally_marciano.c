@@ -80,9 +80,7 @@ int energia_bateria;  // Quantidade de energia fornecida por uma bateria
 /* Mutex e Semáforo */ 
 sem_t *semaforos_movimento;  // Array de semáforos para controlar ordem de movimento
 sem_t *semaforos_roubo;     // Array de semáforos para controlar ordem de roubo
-sem_t sem_turno;            // Semáforo para sincronizar turnos
 pthread_barrier_t turno_barrier;  // Barreira para sincronizar os turnos
-pthread_mutex_t turno_mutex;      // Mutex para controle do turno atual
 
 
 /* Declaração das funções auxiliares */
@@ -108,7 +106,6 @@ int main()
 
     // Inicializa as estruturas de sincronização
     pthread_barrier_init(&turno_barrier, NULL, num_robos);
-    pthread_mutex_init(&turno_mutex, NULL);
     
     // Inicializa os semáforos
     semaforos_movimento = malloc(sizeof(sem_t) * num_robos);
@@ -118,7 +115,6 @@ int main()
         sem_init(&semaforos_movimento[i], 0, 0);
         sem_init(&semaforos_roubo[i], 0, 0);
     }
-    sem_init(&sem_turno, 0, 1);
 
     // Cria o array com as threads
     pthread_t threads[num_robos];
@@ -154,12 +150,11 @@ int main()
         sem_destroy(&semaforos_movimento[i]);
         sem_destroy(&semaforos_roubo[i]);
     }
-    sem_destroy(&sem_turno);
+    
     free(semaforos_movimento);
     free(semaforos_roubo);
 
     pthread_barrier_destroy(&turno_barrier);
-    pthread_mutex_destroy(&turno_mutex);
     destroi_arena(&arena);
     destroi_robos(robos, num_robos);
 
