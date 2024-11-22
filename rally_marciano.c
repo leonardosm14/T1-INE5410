@@ -19,7 +19,7 @@
 #include <semaphore.h>
 #include <string.h>
 
-#include <unistd.h> // PARA O SLEEP - REMOVER AO FINAL
+//#include <unistd.h> // PARA O SLEEP
 
 
 /* Tipos de objetos que podem estar presentes nas células da arena */
@@ -39,7 +39,7 @@ typedef struct
 {
     char obj;  // Objeto presente na célula (VAZIO, PILAR, BATERIA, FIGURA)
     int id;    // ID do robô presente na célula ou -1 se estiver vazia
-    pthread_mutex_t celula_mutex;  // Mutex para controlar o acesso à célula -- Leonardo
+    pthread_mutex_t celula_mutex;  // Mutex para controlar o acesso à célula
 } CelulaArena;
 
 /* Estrutura para representar a arena */
@@ -66,7 +66,7 @@ typedef struct
     int move_j;  // Coluna destino onde o robô pretende se mover
     int id_roubo_energia;  // ID do robô do qual o robô tentará roubar energia
 
-    pthread_mutex_t robo_mutex; // Mutex próprio do robô -- Leonardo
+    pthread_mutex_t robo_mutex; // Mutex próprio do robô
 
 } Robo;
 
@@ -77,12 +77,10 @@ int num_robos;  // Número total de robôs
 int num_total_turnos;  // Número total de turnos da simulação
 int energia_bateria;  // Quantidade de energia fornecida por uma bateria
 
-/* Mutex e Semáforo -- Leonardo */ 
+/* Mutex e Semáforo */ 
 sem_t *semaforos_movimento;  // Array de semáforos para controlar ordem de movimento
 sem_t *semaforos_roubo;     // Array de semáforos para controlar ordem de roubo
-sem_t sem_turno;            // Semáforo para sincronizar turnos
 pthread_barrier_t turno_barrier;  // Barreira para sincronizar os turnos
-pthread_mutex_t turno_mutex;      // Mutex para controle do turno atual
 
 
 /* Declaração das funções auxiliares */
@@ -108,7 +106,6 @@ int main()
 
     // Inicializa as estruturas de sincronização
     pthread_barrier_init(&turno_barrier, NULL, num_robos);
-    pthread_mutex_init(&turno_mutex, NULL);
     
     // Inicializa os semáforos
     semaforos_movimento = malloc(sizeof(sem_t) * num_robos);
@@ -118,7 +115,6 @@ int main()
         sem_init(&semaforos_movimento[i], 0, 0);
         sem_init(&semaforos_roubo[i], 0, 0);
     }
-    sem_init(&sem_turno, 0, 1);
 
     // Cria o array com as threads
     pthread_t threads[num_robos];
@@ -128,9 +124,6 @@ int main()
     {
         printf("Turno %d:\n", turno);
         imprime_estado();
-
-        // Libera o primeiro robô para começar
-        sem_post(&semaforos_movimento[0]);
 
         /* Processa cada robô */
         for (int r = 0; r < num_robos; r++)
@@ -149,17 +142,16 @@ int main()
     imprime_estado();
     imprime_resultados();
 
-    // Destruição dos semáforos
+    /* Destruição dos semáforos e mutexes */
     for(int i = 0; i < num_robos; i++) {
         sem_destroy(&semaforos_movimento[i]);
         sem_destroy(&semaforos_roubo[i]);
     }
-    sem_destroy(&sem_turno);
+    
     free(semaforos_movimento);
     free(semaforos_roubo);
 
     pthread_barrier_destroy(&turno_barrier);
-    pthread_mutex_destroy(&turno_mutex);
     destroi_arena(&arena);
     destroi_robos(robos, num_robos);
 
@@ -194,7 +186,7 @@ void le_entrada()
         {
             arena.cel[i][j].obj = line[j];
             arena.cel[i][j].id = -1;  // Inicialmente, nenhuma célula contém robôs
-            pthread_mutex_init(&arena.cel[i][j].celula_mutex, NULL); // Inicializa o mutex da célula -- Thayse
+            pthread_mutex_init(&arena.cel[i][j].celula_mutex, NULL); // Inicializa o mutex da célula
         }
     }
 
@@ -252,23 +244,17 @@ void imprime_estado()
 void *processa_robo(void *robot)
 {
     Robo *robo = (Robo *)robot;
-
-    // Movimenta (se tiver energia)
-    pthread_mutex_lock(&robo->robo_mutex);
-    if (robo->energia > 0)
-    {
-        calcula_movimento(robo);
-    }
-    pthread_mutex_unlock(&robo->robo_mutex);
     
     // Espera sua vez de movimento
     if (robo->id > 0) {
         sem_wait(&semaforos_movimento[robo->id - 1]);
     }
 
+    // Movimenta (se tiver energia)
     pthread_mutex_lock(&robo->robo_mutex);
     if (robo->energia > 0)
     {
+        calcula_movimento(robo);
         realiza_movimento(robo);
     }
     pthread_mutex_unlock(&robo->robo_mutex);
@@ -494,7 +480,7 @@ void cria_arena(Arena *arena, int linhas, int colunas)
         {
             arena->cel[i][j].obj = VAZIO;  // Célula vazia
             arena->cel[i][j].id = -1;      // Sem robô inicialmente
-            pthread_mutex_init(&arena->cel[i][j].celula_mutex, NULL); // Inicializa o mutex -- Leonardo
+            pthread_mutex_init(&arena->cel[i][j].celula_mutex, NULL); // Inicializa o mutex
         }
     }
 
@@ -524,7 +510,7 @@ void destroi_robos(Robo *robos, int num_robos)
     // Libera a memória alocada para a sequência de movimentos de cada robô
     for (int r = 0; r < num_robos; r++) {
         free(robos[r].sequencia_movimentos);
-        pthread_mutex_destroy(&robos[r].robo_mutex); // Destrói o mutex do robô -- Leonardo
+        pthread_mutex_destroy(&robos[r].robo_mutex); // Destrói o mutex do robô
     }
     // Libera a memória do array de robôs
     free(robos);
